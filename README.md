@@ -1,5 +1,7 @@
 # meca3-example-gravity
 
+**Note** the example has required some changes in meca3 module. They will soon be integrated into meca3.
+
 Simulation of a field of bodies attracted to each other by the **newtonian gravity**.
 
 The simulation represents the **earth-sun system** orbiting at an **accelerated speed**.
