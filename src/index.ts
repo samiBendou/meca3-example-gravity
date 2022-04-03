@@ -1,138 +1,155 @@
 import { Field, Point } from "meca3";
-import { BufferCurve, Vector3, Vector6 } from "space3";
+import { BasicCurve, BufferCurve, Vector3 } from "space3";
 import * as THREE from "three";
+import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 
-const BUFFER_LENGTH = 128000;
+const BUFFER_LENGTH = 4096;
+const SAMPLE_PER_FRAMES = 8192;
+const TARGET_FRAMERATE = 60;
+const BODY_COLORS = [0xffff00, 0x00ffff];
 
-// INITIALIZATION OF THE SIMULATION
+const SECS_PER_DAY = 86400;
+const SECS_PER_MONTH = 2.628e6;
+const GRAVITATIONAL_CONSTANT = 6.67408e-11; // universal gravitation constant in SI
 
-let day = 86400; // day in s
-let month = 2.628e6; // month in s
-let g = 6.67408e-11; // universal gravitation constant in SI
-
-// The array bellow are ordered as [sun, earth]
-let x = [0, 1.47098074e11]; // initial x position in m
-let vy = [0, 3.0287e4]; // initial y speed in m/s
-let mass = [1.9891e30, 5.9736e24]; // mass in kg
-let speed = month; // simulation speed
-let framerate = 60; // framerate of animation in frame/s
-let delta = 1 / framerate; // time step of animation in s
+let speed = SECS_PER_MONTH; // simulation speed
+let delta = 1 / TARGET_FRAMERATE; // time step of animation in s
 let scale = 1e-10; // scaling factor to represent bodies in animation
-let dt = delta / 2048; // time step = delta / number of samples per frame
-let points = mass.map(
-  (m, idx) =>
+let dt = delta / SAMPLE_PER_FRAMES; // time step = delta / number of samples per frame
+let time = 0; // time elapsed in days
+
+function initSimulation() {
+  const points = [
+    new Point(1.9891e30), // sun
     new Point(
-      Vector3.ex.mul(x[idx]),
-      Vector3.ey.mul(vy[idx]),
-      new BufferCurve(
-        new Array(BUFFER_LENGTH)
-          .fill(undefined)
-          .map(() => new Vector6(x[idx], 0, 0, 0, vy[idx], 0))
-      ),
-      m
-    )
-);
+      5.9736e24,
+      Vector3.ex.mul(1.47098074e11),
+      Vector3.ey.mul(3.0287e4)
+    ), // earth
+  ];
 
-// gravitational field between earth and sun
-let makeField = (points) =>
-  points.map((p: Point) => (u: Vector6) => {
-    const acceleration: Vector3 = points.reduce((acc, point) => {
-      const pos = new Vector3(...u.upper);
-      const dist3 = point.position.dist(pos) ** 3 || Number.POSITIVE_INFINITY;
-      const k = (g * point.mass) / dist3;
-      return acc.add(point.position.sub(pos).mul(k));
-    }, Vector3.zeros);
-    u.upper = p.speed.array();
-    u.lower = acceleration.array();
-    return u;
+  const trajectories = points.map((p) =>
+    BufferCurve.bufferize(BasicCurve.constant(BUFFER_LENGTH, p.position))
+  );
+
+  // gravitational field between earth and sun
+  const gravitationalAcceleration = (acceleration, position) => {
+    return points.reduce((acc, point) => {
+      const dist3 =
+        point.position.dist(position) ** 3 || Number.POSITIVE_INFINITY;
+      const k = (GRAVITATIONAL_CONSTANT * point.mass) / dist3;
+      return acc.add(point.position.sub(position).mul(k));
+    }, acceleration);
+  };
+
+  const field = new Field(points, gravitationalAcceleration, dt * speed);
+
+  return { field, trajectories };
+}
+
+function initObjectSpheres(points) {
+  // The points in simulation are represented as spheres of different colors.
+  const geometry = new THREE.SphereGeometry(2);
+  const materials = points.map(
+    (_, idx) => new THREE.MeshBasicMaterial({ color: BODY_COLORS[idx] })
+  );
+  return materials.map((material) => new THREE.Mesh(geometry, material));
+}
+
+function initObjectLines(trajectories) {
+  const geometries = trajectories.map((trajectory) => {
+    const geometry = new THREE.Geometry();
+    geometry.vertices = trajectory.positions.map(
+      (p) => new THREE.Vector3(p.x * scale, p.y * scale, p.z * scale)
+    );
+    return geometry;
   });
-
-let field = new Field(points, makeField, Vector6.zeros, dt * speed);
-let time = 0;
-
-points.forEach((point, index) => {
-  console.log(
-    `points[${index}](${Math.floor(time)}) = ${point.position.toString()}`
+  const materials = trajectories.map(
+    (_, idx) =>
+      new THREE.LineDashedMaterial({
+        color: BODY_COLORS[idx],
+        linewidth: 1,
+        scale: 1,
+        dashSize: 10,
+        gapSize: 10,
+      })
   );
-});
-
-// INITIALIZATION OF 3D SCENE
-
-let scene = new THREE.Scene();
-let camera = new THREE.PerspectiveCamera(
-  75,
-  window.innerWidth / window.innerHeight,
-  0.1,
-  1000
-);
-let renderer = new THREE.WebGLRenderer();
-
-renderer.setSize(window.innerWidth, window.innerHeight);
-document.body.appendChild(renderer.domElement);
-
-// The points in simulation are represented as spheres of different colors.
-let geometry = new THREE.SphereGeometry(2);
-let colors = [0xffff00, 0x00ffff]; //, 0xff00ff];
-let materials = colors.map(
-  (color) => new THREE.MeshBasicMaterial({ color: color })
-);
-let trajectoryGeometries = points.map((point) => {
-  const geometry = new THREE.Geometry();
-  geometry.vertices = point.trajectory.positions.map(
-    (p) => new THREE.Vector3(p.x * scale, p.y * scale, p.z * scale)
+  return trajectories.map(
+    (_, idx) => new THREE.Line(geometries[idx], materials[idx])
   );
-  return geometry;
-});
-let trajectoryMaterials = colors.map(
-  (color) =>
-    new THREE.LineDashedMaterial({
-      color: color,
-      linewidth: 10,
-      scale: 1,
-      dashSize: 3,
-      gapSize: 1,
-    })
-);
-let trajectoryLines = colors.map(
-  (_, idx) =>
-    new THREE.Line(trajectoryGeometries[idx], trajectoryMaterials[idx])
-);
+}
 
-let spheres = materials.map((material) => new THREE.Mesh(geometry, material));
-scene.add(...spheres, ...trajectoryLines);
+function initScene(...objects: THREE.Object3D[]) {
+  const scene = new THREE.Scene();
+  const camera = new THREE.PerspectiveCamera(
+    75,
+    window.innerWidth / window.innerHeight,
+    0.1,
+    1000
+  );
+  const renderer = new THREE.WebGLRenderer();
+  const controls = new OrbitControls(camera);
 
-camera.position.z = 75;
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  scene.add(...objects);
+  camera.position.z = 75;
 
-// SIMULATION LOOP
+  document.body.appendChild(renderer.domElement);
 
-function animate() {
+  return { renderer, scene, camera, controls };
+}
+
+function updateSimulation(field: Field, trajectories: BufferCurve[]) {
+  // updating the position and speed of the points in field
+  for (let t = 0; t < delta; t += dt) {
+    field.update();
+  }
+  time += (delta * speed) / SECS_PER_DAY;
+
+  trajectories.forEach((trajectory, idx) => {
+    trajectory.push(field.points[idx].position);
+  });
+}
+
+function updateObjectSpheres(field: Field, spheres: THREE.Mesh[]) {
   // updating spheres position in sphere according to current position of points in field
   spheres.forEach((sphere, idx) => {
-    sphere.position.x = field.points[idx].position.x * scale;
-    sphere.position.y = field.points[idx].position.y * scale;
-    sphere.position.z = field.points[idx].position.z * scale;
+    const position = field.points[idx].position.xyz;
+    sphere.position.set(...position).multiplyScalar(scale);
   });
+}
 
-  trajectoryGeometries.forEach((geometry, idx) => {
-    for (let vIdx = 0; vIdx < BUFFER_LENGTH; vIdx++) {
-      const position = field.points[idx].trajectory.positions[vIdx].upper;
-      geometry.vertices[vIdx].x = position[0] * scale;
-      geometry.vertices[vIdx].y = position[1] * scale;
-      geometry.vertices[vIdx].z = position[2] * scale;
-    }
+function updateObjectLines(trajectories: BufferCurve[], lines: THREE.Mesh[]) {
+  lines.forEach((line, idx) => {
+    const geometry = line.geometry as THREE.Geometry;
+    geometry.vertices.forEach((vertex, vIdx) => {
+      const position = trajectories[idx].get(vIdx).xyz;
+      vertex.set(...position).multiplyScalar(scale);
+    });
 
     geometry.verticesNeedUpdate = true;
     geometry.normalsNeedUpdate = true;
   });
-
-  requestAnimationFrame(animate);
-  renderer.render(scene, camera);
-
-  // updating the position of the points in field
-  for (let t = 0; t < delta; t += dt) {
-    field.update();
-  }
-  time += (delta * speed) / day;
 }
 
+function init() {
+  const { field, trajectories } = initSimulation();
+  const spheres = initObjectSpheres(field.points);
+  const lines = initObjectLines(trajectories);
+  const { renderer, scene, camera, controls } = initScene(...spheres, ...lines);
+
+  return function animate() {
+    updateSimulation(field, trajectories);
+    updateObjectSpheres(field, spheres);
+    updateObjectLines(trajectories, lines);
+
+    controls.update();
+    renderer.render(scene, camera);
+    requestAnimationFrame(animate);
+  };
+}
+
+// SIMULATION LOOP
+
+const animate = init();
 animate();
