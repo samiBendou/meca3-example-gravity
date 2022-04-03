@@ -2,7 +2,7 @@ import { Field, Point } from "meca3";
 import { BufferCurve, Vector3, Vector6 } from "space3";
 import * as THREE from "three";
 
-const BUFFER_LENGTH = 256;
+const BUFFER_LENGTH = 128000;
 
 // INITIALIZATION OF THE SIMULATION
 
@@ -114,14 +114,13 @@ function animate() {
   });
 
   trajectoryGeometries.forEach((geometry, idx) => {
-    geometry.vertices = field.points[idx].trajectory.positions.map((p) => {
-      console.log(p.upper[0] * scale);
-      return new THREE.Vector3(
-        p.upper[0] * scale,
-        p.upper[1] * scale,
-        p.upper[2] * scale
-      );
-    });
+    for (let vIdx = 0; vIdx < BUFFER_LENGTH; vIdx++) {
+      const position = field.points[idx].trajectory.positions[vIdx].upper;
+      geometry.vertices[vIdx].x = position[0] * scale;
+      geometry.vertices[vIdx].y = position[1] * scale;
+      geometry.vertices[vIdx].z = position[2] * scale;
+    }
+
     geometry.verticesNeedUpdate = true;
     geometry.normalsNeedUpdate = true;
   });
