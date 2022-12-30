@@ -9,7 +9,7 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
-    "meca3": "^3.2.1",
+    "meca3": "^4.0.1",
     "three": "^0.105.2"
   }
 }
